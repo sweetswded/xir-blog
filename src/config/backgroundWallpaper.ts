@@ -57,13 +57,14 @@ export const backgroundWallpaper: BackgroundWallpaperConfig = {
 			titleSize: "3.8rem",
 			// 主页横幅副标题
 			subtitle: [
-				"心如止水",
+				"欢迎来到昔日的博客！",
+				"记录学习与生活的点滴。",
 			],
 			// 主页横幅副标题字体大小
 			subtitleSize: "1.5rem",
 			typewriter: {
 				// 是否启用打字机效果
-				enable: false,
+				enable: true,
 				// 打字速度（毫秒）
 				speed: 100,
 				// 删除速度（毫秒）
