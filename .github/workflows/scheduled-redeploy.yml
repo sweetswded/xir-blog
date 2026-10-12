@@ -1,0 +1,59 @@
+name: Scheduled redeploy
+
+# 定时 POST 一次 Cloudflare Pages 的 Deploy Hook，让编译期抓取的 Bangumi 数据保持新鲜。
+# 定时器就是 GitHub Actions 自己，不需要再注册第三方定时服务。
+#
+# 使用前必须在仓库里配置一个 Secret：
+#   Settings → Secrets and variables → Actions → New repository secret
+#   名称：CF_DEPLOY_HOOK
+#   值：Cloudflare Pages 项目（xiri-blog）→ Settings → Builds → Add deploy hook
+#       生成的那条 URL，形如 https://api.cloudflare.com/client/v4/pages/webhooks/deploy_hooks/****
+#
+# 想改频率就改下面的 cron（已指定 timezone，所以直接写北京时间）：
+#   每天 04:00 一次          -> '17 4 * * *'
+#   每天 04:00 / 16:00 两次  -> '17 4,16 * * *'
+#   每 6 小时一次（当前）    -> '17 */6 * * *'
+# 注意：Cloudflare Pages 免费版限额 500 次构建/月，别设成每小时（720 次/月会打爆配额）。
+# 分钟特意错开整点，避开 GitHub Actions 的高峰延迟。
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+      timezone: "Asia/Shanghai"
+  # 也可以在 Actions 页面手动点一下立刻触发（用来验证 Secret 配好了没）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-redeploy
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 检查 Secret 是否已配置
+        env:
+          HOOK: ${{ secrets.CF_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::error::尚未配置 Secret CF_DEPLOY_HOOK。请到 Settings → Secrets and variables → Actions → New repository secret 添加，值为 Cloudflare Pages 的 Deploy Hook URL。"
+            exit 1
+          fi
+
+      - name: 触发 Cloudflare Pages 构建
+        env:
+          HOOK: ${{ secrets.CF_DEPLOY_HOOK }}
+        run: |
+          status=$(curl -sS -o /tmp/hook-response.json -w '%{http_code}' -X POST "$HOOK")
+          echo "HTTP $status"
+          cat /tmp/hook-response.json 2>/dev/null || true
+          echo
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::error::Deploy Hook 返回 HTTP $status（注意必须用 POST 触发构建）"
+            exit 1
+          fi
+          echo "✅ 已触发 Cloudflare Pages 构建，稍后可在 Pages 的 Deployments 列表看到这一次"
