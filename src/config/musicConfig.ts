@@ -25,8 +25,10 @@ export const musicPlayerConfig: MusicPlayerConfig = {
 	// Meting API 配置
 	meting: {
 		// Meting API 地址
-		// 默认使用官方 API，也可以使用自定义 API
-		api: "https://api.i-meto.com/meting/api?server=:server&type=:type&id=:id&r=:r",
+		// 播放器会按顺序探测下列接口，只有「歌单非空且音频地址真的能解析」的
+		// 接口才会被采用，所以此处顺序 = 优先级。
+		// 主接口：当前实测音频可正常解析
+		api: "https://api.injahow.cn/meting/?server=:server&type=:type&id=:id",
 		// 音乐平台：netease=网易云音乐, tencent=QQ音乐, kugou=酷狗音乐, xiami=虾米音乐, baidu=百度音乐
 		server: "netease",
 		// 类型：song=单曲, playlist=歌单, album=专辑, search=搜索, artist=艺术家
@@ -37,8 +39,10 @@ export const musicPlayerConfig: MusicPlayerConfig = {
 		auth: "",
 		// 备用 API 配置（当主 API 失败时使用）
 		fallbackApis: [
-			"https://api.injahow.cn/meting/?server=:server&type=:type&id=:id",
 			"https://api.moeyao.cn/meting/?server=:server&type=:type&id=:id",
+			// api.i-meto.com 目前只能列出歌单，音频解析返回 401，故降为最后备用；
+			// 等其上游恢复后把顺序调回即可
+			"https://api.i-meto.com/meting/api?server=:server&type=:type&id=:id&r=:r",
 		],
 	},
 

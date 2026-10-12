@@ -115,7 +115,8 @@ const managerConfigStr = JSON.stringify({
         currentLrcIndex: -1,
         initialized: false,
         initializing: false,
-        error: null
+        error: null,
+        sourceApi: null // which Meting instance the playlist came from
     };
 
     // Map config playMode string to number
@@ -129,41 +130,131 @@ const managerConfigStr = JSON.stringify({
     }
 
     // ── Meting fetch ─────────────────────────────────────────
+    // A Meting instance can stay alive for the playlist query while its audio
+    // resolver is dead (it then hands out per-song URLs that answer 401/404).
+    // Listing songs is therefore not proof of health: each instance must also
+    // resolve playable audio before it is accepted.
+    function buildMetingUrl(baseApi, m, type, id) {
+        var fetchUrl = baseApi
+            .replace(':server', m.server)
+            .replace(':type', type)
+            .replace(':id', id)
+            .replace(':r', Math.random());
+        if (m.auth) fetchUrl += '&auth=' + m.auth;
+        return fetchUrl;
+    }
+
+    // Some instances emit PHP notices/warnings before the JSON body.
+    function parseMetingJson(text) {
+        try {
+            return JSON.parse(text);
+        } catch (e) { /* fall through to salvage */ }
+        var start = text.indexOf('[');
+        var end = text.lastIndexOf(']');
+        if (start !== -1 && end > start) {
+            try {
+                return JSON.parse(text.slice(start, end + 1));
+            } catch (e2) { /* not salvageable */ }
+        }
+        return null;
+    }
+
+    async function fetchMetingList(baseApi) {
+        var m = config.meting;
+        var res = await fetch(buildMetingUrl(baseApi, m, m.type, m.id));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+
+        var data = parseMetingJson(await res.text());
+        if (!Array.isArray(data) || data.length === 0) throw new Error('empty playlist');
+
+        return data
+            .filter(function (item) { return item && item.url; })
+            .map(function (item) {
+                return {
+                    name: item.title || item.name || 'Unknown',
+                    artist: item.author || item.artist || 'Unknown',
+                    url: item.url,
+                    pic: item.pic || item.cover || '',
+                    lrc: item.lrc
+                };
+            });
+    }
+
+    // Does this instance actually resolve audio the browser can fetch?
+    // Cancels the body right after the headers so no real traffic is spent.
+    async function canResolveAudio(url) {
+        if (!url) return false;
+        var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        var timer = ctrl
+            ? setTimeout(function () { ctrl.abort(); }, 8000)
+            : null;
+        try {
+            var res = await fetch(url, {
+                redirect: 'follow',
+                signal: ctrl ? ctrl.signal : undefined
+            });
+            var type = (res.headers.get('content-type') || '').toLowerCase();
+            try {
+                if (res.body && res.body.cancel) res.body.cancel();
+            } catch (e) { /* body already gone */ }
+            // A song that is not really available often answers 200 with an HTML
+            // error page, which the <audio> element cannot play either.
+            return res.ok && type.indexOf('text/html') === -1;
+        } catch (e) {
+            return false;
+        } finally {
+            if (timer) clearTimeout(timer);
+        }
+    }
+
+    async function instanceIsHealthy(list) {
+        var probes = Math.min(list.length, 3);
+        for (var i = 0; i < probes; i++) {
+            if (await canResolveAudio(list[i].url)) return true;
+        }
+        return false;
+    }
+
     async function fetchMetingData() {
         if (!config.meting) return;
         var m = config.meting;
         var apis = [m.api].concat(m.fallbackApis || []);
+        var seen = {};
+        var lastResort = null;
+        var lastResortApi = null;
 
         for (var i = 0; i < apis.length; i++) {
             var baseApi = apis[i];
-            if (!baseApi) continue;
+            if (!baseApi || seen[baseApi]) continue;
+            seen[baseApi] = true;
+
             try {
-                var fetchUrl = baseApi
-                    .replace(':server', m.server)
-                    .replace(':type', m.type)
-                    .replace(':id', m.id)
-                    .replace(':r', Math.random());
-                if (m.auth) fetchUrl += '&auth=' + m.auth;
+                var list = await fetchMetingList(baseApi);
+                if (list.length === 0) continue;
 
-                var res = await fetch(fetchUrl);
-                if (!res.ok) throw new Error('HTTP ' + res.status);
-                var data = await res.json();
+                if (!lastResort) {
+                    lastResort = list;
+                    lastResortApi = baseApi;
+                }
 
-                if (Array.isArray(data) && data.length > 0) {
-                    state.playlist = data.map(function (item) {
-                        return {
-                            name: item.title || item.name || 'Unknown',
-                            artist: item.author || item.artist || 'Unknown',
-                            url: item.url,
-                            pic: item.pic || item.cover || '',
-                            lrc: item.lrc
-                        };
-                    });
+                if (await instanceIsHealthy(list)) {
+                    state.playlist = list;
+                    state.sourceApi = baseApi;
                     return;
                 }
+                console.warn('Meting API listed songs but cannot resolve audio: ' + baseApi);
             } catch (e) {
                 console.warn('Meting API failed for ' + baseApi, e);
             }
+        }
+
+        if (lastResort) {
+            // No instance passed the audio probe. The probe can be inconclusive
+            // (blocked CORS path, transient network error), so keep the old
+            // behaviour instead of showing an empty player.
+            state.playlist = lastResort;
+            state.sourceApi = lastResortApi;
+            return;
         }
         throw new Error('All Meting APIs failed');
     }
@@ -427,6 +518,7 @@ const managerConfigStr = JSON.stringify({
                 currentLrcIndex: state.currentLrcIndex,
                 initialized: state.initialized,
                 error: state.error,
+                sourceApi: state.sourceApi,
                 config: config
             };
         },
