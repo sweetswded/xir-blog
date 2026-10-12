@@ -117,8 +117,9 @@ export const siteConfig: SiteConfig = {
 
 	// bangumi配置
 	bangumi: {
-		// Bangumi用户ID
-		userId: "563014",
+		// Bangumi 用户名：bgm.tv/user/ 后面那一段（https://bgm.tv/user/xiri 就填 xiri）
+		// 注意必须填用户名，不能填数字 UID —— v0 接口的路径只认用户名，填数字会 404
+		userId: "xiri",
 		// 条目类型排序，数组中的类型将按顺序优先展示
 		// 可选值: "anime" | "book" | "music" | "game" | "real" (暂不支持"real"类型)
 		// 未列出的类型将按默认顺序排在后面

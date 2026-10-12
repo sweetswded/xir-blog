@@ -132,7 +132,8 @@ async function fetchBangumiData(username: string, subjectType: number) {
 // 获取所有启用分类的数据
 const bangumiData: Record<string, UserSubjectCollection[]> = {};
 const tabs: Array<{ id: string; name: string; count: number }> = [];
-let fetchFailed = false;
+const failedCategories: string[] = [];
+let attemptedCategories = 0;
 
 // 检查是否已配置 Bangumi 用户ID
 const isUserIdConfigured =
@@ -153,6 +154,7 @@ for (const [categoryKey, enabled] of Object.entries(bangumiConfig.categories)) {
 	}
 	if (enabled && categoryMap[categoryKey as keyof typeof categoryMap]) {
 		const categoryInfo = categoryMap[categoryKey as keyof typeof categoryMap];
+		attemptedCategories++;
 		try {
 			const data = await fetchBangumiData(
 				// biome-ignore lint/style/noNonNullAssertion: Checked by isUserIdConfigured
@@ -166,12 +168,22 @@ for (const [categoryKey, enabled] of Object.entries(bangumiConfig.categories)) {
 				count: data.length,
 			});
 		} catch (error) {
+			// 单个分类失败不该拖垮整页：记下来并继续抓下一个分类，
+			// 只有当所有分类都失败时才展示整页错误
 			console.error(`[Bangumi] 获取 ${categoryInfo.name} 数据失败:`, error);
-			fetchFailed = true;
-			break;
+			failedCategories.push(categoryInfo.name);
 		}
 	}
 }
+
+if (failedCategories.length > 0) {
+	console.warn(
+		`[Bangumi] ⚠️ ${failedCategories.length}/${attemptedCategories} 个分类获取失败：${failedCategories.join("、")}`,
+	);
+}
+
+// 仅在没有任何分类成功时才视为整页失败
+const fetchFailed = attemptedCategories > 0 && tabs.length === 0;
 
 // 根据 categoryOrder 配置对 tabs 进行排序
 const categoryOrder = siteConfig.bangumi?.categoryOrder || [];
