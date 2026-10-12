@@ -13,7 +13,7 @@ export const siteConfig: SiteConfig = {
 	subtitle: "心如止水",
 
 	// 站点 URL
-	site_url: "https://firefly.cuteleaf.cn",
+	site_url: "https://www.xiri.it.com",
 
 	// 站点描述
 	description:
