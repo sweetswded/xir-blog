@@ -15,6 +15,11 @@ name: Scheduled redeploy
 #   每 6 小时一次（当前）    -> '17 */6 * * *'
 # 注意：Cloudflare Pages 免费版限额 500 次构建/月，别设成每小时（720 次/月会打爆配额）。
 # 分钟特意错开整点，避开 GitHub Actions 的高峰延迟。
+#
+# 行为说明（自动适应）：
+#   · 未配置 Secret 时，定时运行只记一条 warning 并正常跳过 —— 不会红叉、不会发失败邮件；
+#   · 手动点 Run workflow 且 Secret 未配置时会直接报错，方便测试时立刻发现；
+#   · Secret 一配上，下一次定时运行就会自动开始真正部署，不用再改这个文件。
 
 on:
   schedule:
@@ -36,15 +41,40 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: 检查 Secret 是否已配置
+        id: check
         env:
           HOOK: ${{ secrets.CF_DEPLOY_HOOK }}
         run: |
-          if [ -z "$HOOK" ]; then
+          if [ -n "$HOOK" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Secret 已配置，准备触发部署"
+            exit 0
+          fi
+
+          # 手动触发：直接红叉报错，方便测试时立刻发现问题
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "::error::尚未配置 Secret CF_DEPLOY_HOOK。请到 Settings → Secrets and variables → Actions → New repository secret 添加，值为 Cloudflare Pages 的 Deploy Hook URL。"
             exit 1
           fi
 
+          # 定时触发：只警告并跳过，避免每 6 小时红一次；Secret 配好后自动开始工作
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::尚未配置 Secret CF_DEPLOY_HOOK，本次定时部署已跳过。配置方法：仓库 Settings → Secrets and variables → Actions → New repository secret，Name 填 CF_DEPLOY_HOOK，值填 Cloudflare Pages 项目 xiri-blog 的 Deploy Hook URL。配好后下一次定时运行会自动开始部署。"
+          {
+            echo "### ⚠️ 定时部署已跳过（Secret 未配置）"
+            echo ""
+            echo "没有找到 Secret \`CF_DEPLOY_HOOK\`，这次没有触发 Cloudflare 构建。"
+            echo ""
+            echo "**配置方法**：仓库 **Settings → Secrets and variables → Actions → New repository secret**"
+            echo ""
+            echo "- Name：\`CF_DEPLOY_HOOK\`"
+            echo "- Secret：Cloudflare Pages（项目 \`xiri-blog\`）→ Settings → Builds → Deploy hooks 生成的那条 URL"
+            echo ""
+            echo "配好后下一次定时运行会自动开始部署；也可以回到任意一次运行点右上角 **Re-run jobs** 立即验证。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: 触发 Cloudflare Pages 构建
+        if: steps.check.outputs.ready == 'true'
         env:
           HOOK: ${{ secrets.CF_DEPLOY_HOOK }}
         run: |
